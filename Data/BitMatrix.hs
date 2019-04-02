@@ -3,19 +3,19 @@
 module Data.BitMatrix where
 
 import Data.Bits
-import Data.Foldable
 import Data.Monoid
+import Data.Foldable (foldr)
 import Data.Text.Lazy (unpack)
 import Data.Text.Lazy.Builder
-import qualified Data.Vector as V
-import qualified Data.Vector.Unboxed as U
-import Prelude hiding ((!!))
+import Data.Vector hiding (singleton, slice, elem, foldr)
+import qualified Data.Vector as Vector
+import Prelude hiding ((++), take, drop, foldr, sum, length, splitAt, replicate, zip)
 
 import Data.BitVector
 
 
-(!!) :: V.Vector a -> Int -> a
-(!!) = V.unsafeIndex
+(!!.) :: Vector a -> Int -> a
+(!!.) = unsafeIndex
 
 -- |    m0,m1,m2,..
 --   r0 0x00000001
@@ -24,7 +24,7 @@ import Data.BitVector
 -- 
 --  m0 <=> LSB
 --
-data BitMatrix = BitMatrix !Int (V.Vector BitVector)
+data BitMatrix = BitMatrix !Int (Vector BitVector)
 
 instance Eq BitMatrix where
   BitMatrix m u == BitMatrix n v = m == n && u == v
@@ -32,33 +32,33 @@ instance Eq BitMatrix where
 -- | Inexpensive: right shifts, row operators, bitwise ands, word aligned parameters
 --
 instance Bits BitMatrix where
-  bitSizeMaybe (BitMatrix c v) = Just $ c * V.length v
+  bitSizeMaybe (BitMatrix c v) = Just $ c * length v
   isSigned _ = False
 
   BitMatrix c u .&. BitMatrix d v
-    = BitMatrix (min c d) $ uncurry (.&.) <$> V.zip u v
+    = BitMatrix (min c d) $ uncurry (.&.) <$> zip u v
 
   BitMatrix c u .|. BitMatrix d v
-    | V.length u > V.length v
-    = BitMatrix (max c d) . flip V.imap u
-    $ \i ui -> if i >= V.length v then ui else ui .|. v!!i
+    | length u > length v
+    = BitMatrix (max c d) . flip imap u
+    $ \i ui -> if i >= length v then ui else ui .|. v!!.i
   BitMatrix c u .|. BitMatrix d v
-    | V.length u < V.length v
-    = BitMatrix (max c d) . flip V.imap v
-    $ \i vi -> if i >= V.length u then vi else u!!i .|. vi
+    | length u < length v
+    = BitMatrix (max c d) . flip imap v
+    $ \i vi -> if i >= length u then vi else u!!.i .|. vi
   BitMatrix c u .|. BitMatrix d v
-    = BitMatrix (max c d) $ uncurry (.|.) <$> V.zip u v
+    = BitMatrix (max c d) $ uncurry (.|.) <$> zip u v
   
   BitMatrix c u `xor` BitMatrix d v
-    | V.length u > V.length v
-    = BitMatrix (max c d) . flip V.imap u
-    $ \i ui -> if i >= V.length v then ui else ui `xor` v!!i
+    | length u > length v
+    = BitMatrix (max c d) . flip imap u
+    $ \i ui -> if i >= length v then ui else ui `xor` v!!.i
   BitMatrix c u `xor` BitMatrix d v
-    | V.length u < V.length v
-    = BitMatrix (max c d) . flip V.imap v
-    $ \i vi -> if i >= V.length u then vi else u!!i `xor` vi
+    | length u < length v
+    = BitMatrix (max c d) . flip imap v
+    $ \i vi -> if i >= length u then vi else u!!.i `xor` vi
   BitMatrix c u `xor` BitMatrix d v
-    = BitMatrix (max c d) $ uncurry xor <$> V.zip u v
+    = BitMatrix (max c d) $ uncurry xor <$> zip u v
 
   complement (BitMatrix c v)
     = BitMatrix c $ complementN c <$> v
@@ -67,20 +67,20 @@ instance Bits BitMatrix where
     = sum $ popCountN c <$> v
 
   testBit (BitMatrix c v) n
-    = n <= c * V.length v && testBit (v !! div n c) (mod n c)
+    = n <= c * length v && testBit (v !!. div n c) (mod n c)
 
   bit n
-    = BitMatrix wordSize . V.generate (divWord n + 1)
+    = BitMatrix wordSize . generate (divWord n + 1)
     $ \i -> if i /= divWord n then zeroBits else bit $ modWord n
 
-  zeroBits = BitMatrix 0 V.empty
+  zeroBits = BitMatrix 0 empty
 
   clearBit (BitMatrix c v) n
-    | n > c * V.length v
+    | n > c * length v
     = BitMatrix c v
   clearBit (BitMatrix c v) n
     | (m, k) <- divMod n c
-    = BitMatrix c . flip V.imap v
+    = BitMatrix c . flip imap v
     $ \i vi -> if i /= m then vi else vi .&. complementN k (bit k)
 
   shift (BitMatrix c v) 0 = BitMatrix c v 
@@ -90,8 +90,8 @@ instance Bits BitMatrix where
   rotate (BitMatrix c v) n = BitMatrix c $ flip rotate n <$> v
 
 rowShift :: BitMatrix -> Int -> BitMatrix
-rowShift (BitMatrix c v) n | n > 0 = BitMatrix c $ V.replicate n zeroBits V.++ v
-rowShift (BitMatrix c v) n | n < 0 = BitMatrix c $ V.drop (-n) v
+rowShift (BitMatrix c v) n | n > 0 = BitMatrix c $ replicate n zeroBits ++ v
+rowShift (BitMatrix c v) n | n < 0 = BitMatrix c $ drop (-n) v
 rowShift bm _ = bm
 
 rowShiftR :: BitMatrix -> Int -> BitMatrix
@@ -103,12 +103,12 @@ rowShiftL x n = rowShift x n
 rowRotate :: BitMatrix -> Int -> BitMatrix
 rowRotate (BitMatrix c v) n
   | n > 0
-  , (v0, v1) <- V.splitAt (n `mod` V.length v) v
-  = BitMatrix c $ v1 V.++ v0
+  , (v0, v1) <- splitAt (n `mod` length v) v
+  = BitMatrix c $ v1 ++ v0
 rowRotate (BitMatrix c v) n
   | n < 0 
-  , (v0, v1) <- V.splitAt (V.length v + (-n) `mod` V.length v) v
-  = BitMatrix c $ v1 V.++ v0
+  , (v0, v1) <- splitAt (length v + (-n) `mod` length v) v
+  = BitMatrix c $ v1 ++ v0
 rowRotate bm _ = bm
 
 rowRotateR :: BitMatrix -> Int -> BitMatrix
@@ -118,7 +118,7 @@ rowRotateL :: BitMatrix -> Int -> BitMatrix
 rowRotateL x n = rowRotate x n
 
 rowSlice :: Int -> Int -> BitMatrix -> BitMatrix
-rowSlice x n (BitMatrix c v) = BitMatrix c $ V.slice x n v
+rowSlice x n (BitMatrix c v) = BitMatrix c $ Vector.slice x n v
 
 columnSlice :: Int -> Int -> BitMatrix -> BitMatrix
 columnSlice _ 0 _ = BitMatrix 0 mempty
@@ -128,15 +128,15 @@ columnSlice x n (BitMatrix _ v) = BitMatrix n $ slice x n <$> v
 -- | O(ms*rs)
 transpose :: BitMatrix -> BitMatrix
 transpose (BitMatrix c v)
-  = BitMatrix (V.length v) . V.generate c
-  $ \i -> V.ifoldl' (\n j a -> if testBit a i then setBit n j else n) zeroBits v
+  = BitMatrix (length v) . generate c
+  $ \i -> ifoldl' (\n j a -> if testBit a i then setBit n j else n) zeroBits v
 
 
 instance Show BitMatrix where
   show = unpack . toLazyText . bitMatrixBuilder
 
 bitMatrixBuilder :: BitMatrix -> Builder
-bitMatrixBuilder (BitMatrix c v) | elem 0 [c, V.length v] = "( )" 
+bitMatrixBuilder (BitMatrix c v) | elem 0 [c, length v] = "( )"
 bitMatrixBuilder (BitMatrix c v)
   = foldr (\e s -> "( " <> foldr (check e) mempty [0..(c-1)] <> " )\n" <> s) mempty v
   where
