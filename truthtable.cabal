@@ -8,6 +8,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:
+    Data.BitVector,
     Data.BitMatrix
   ghc-options:        -Wall -O2 -fno-warn-unused-do-bind -funbox-strict-fields
   build-depends:      base >=4.8
